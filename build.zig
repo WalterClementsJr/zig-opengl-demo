@@ -22,7 +22,11 @@ pub fn build(b: *std.Build) void {
     exe.linkSystemLibrary("glfw");
     exe.linkSystemLibrary("GL");
 
-    // zig opengl binding
+    exe.addIncludePath(b.path("glad/include/"));
+    exe.addCSourceFile(.{
+        .file = b.path("glad/src/glad.c"),
+        .flags = &[_][]const u8{},
+    });
 
     b.installArtifact(exe);
 
