@@ -18,14 +18,11 @@ pub fn build(b: *std.Build) void {
             },
         }),
     });
+    exe.linkLibC();
     exe.linkSystemLibrary("glfw");
+    exe.linkSystemLibrary("GL");
 
     // zig opengl binding
-    const zgl = b.dependency("zgl", .{
-        .target = target,
-        .optimize = optimize,
-    });
-    exe.root_module.addImport("zgl", zgl.module("zgl"));
 
     b.installArtifact(exe);
 
