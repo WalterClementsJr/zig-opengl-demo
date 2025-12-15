@@ -6,6 +6,7 @@ const glad = @cImport({
     @cInclude("glad/glad.h");
 });
 const builtin = @import("builtin");
+const matrix = @import("./math3d.zig");
 
 var stdout = std.fs.File.stdout().writer(&.{});
 
@@ -94,7 +95,7 @@ fn initShader(source: []const u8, name: []const u8, shaderType: glad.GLenum) !c.
 
     var written: c.GLsizei = 0;
     glad.glGetShaderInfoLog(shaderId, errorSize, &written, message.ptr);
-    try stdout.interface.print("Error compiling shader {s}: {s}\n", .{name, message});
+    try stdout.interface.print("Error compiling shader {s}: {s}\n", .{ name, message });
 }
 
 fn gladLoader(name: [*c]const u8) callconv(.c) ?*anyopaque {
@@ -128,32 +129,33 @@ pub fn main() !u8 {
 
     const shaderProgram = try createShaderProgram();
 
+    // Put the shader program, and the VAO, in focus in OpenGL's state machine.
+    const mat3 = matrix.Matrix(3, 3).init([_][3]f32{
+        [_]f32{ 0.0, 0.5, 0.0 },
+        [_]f32{ 0.5, -0.5, 0.0 },
+        [_]f32{ -0.5, -0.5, 0.0 },
+    });
+    const elements = mat3.flatten();
+
+    var vbo: c.GLuint = 0;
+    glad.glGenBuffers(1, &vbo);
+    glad.glBindBuffer(c.GL_ARRAY_BUFFER, vbo);
+    glad.glBufferData(c.GL_ARRAY_BUFFER, elements.len * @sizeOf(f32), &elements, c.GL_STATIC_DRAW);
+
+    var vao: c.GLuint = 0;
+    glad.glGenVertexArrays(1, &vao);
+    glad.glBindVertexArray(vao);
+    glad.glEnableVertexAttribArray(0);
+    glad.glBindBuffer(c.GL_ARRAY_BUFFER, vbo);
+    glad.glVertexAttribPointer(0, 3, c.GL_FLOAT, c.GL_FALSE, 0, null);
+    glad.glUseProgram(shaderProgram);
+    glad.glBindVertexArray(vao);
+
+    // Draw points 0-3 from the currently bound VAO with current in-use shader.
     while ((c.glfwGetKey(window, c.GLFW_KEY_ESCAPE) != c.GLFW_PRESS) & (c.glfwWindowShouldClose(window) == 0)) {
         c.glClear(c.GL_COLOR_BUFFER_BIT | c.GL_DEPTH_BUFFER_BIT);
 
-        // Put the shader program, and the VAO, in focus in OpenGL's state machine.
-        const points = [_]f32{
-            0.0, 0.5, 0.0, // x,y,z o irst point.
-            0.5, -0.5, 0.0, // x,y,z o second point.
-            -0.5, -0.5, 0.0, // x,y,z o third point.
-        };
-        var vbo: c.GLuint = 0;
-        glad.glGenBuffers(1, &vbo);
-        glad.glBindBuffer(c.GL_ARRAY_BUFFER, vbo);
-        glad.glBufferData(c.GL_ARRAY_BUFFER, points.len * @sizeOf(f32), &points, c.GL_STATIC_DRAW);
-
-        var vao: c.GLuint = 0;
-        glad.glGenVertexArrays(1, &vao);
-        glad.glBindVertexArray(vao);
-        glad.glEnableVertexAttribArray(0);
-        glad.glBindBuffer(c.GL_ARRAY_BUFFER, vbo);
-        glad.glVertexAttribPointer(0, 3, c.GL_FLOAT, c.GL_FALSE, 0, null);
-        glad.glUseProgram(shaderProgram);
-        glad.glBindVertexArray(vao);
-
-        // Draw points 0-3 from the currently bound VAO with current in-use shader.
         glad.glDrawArrays(glad.GL_TRIANGLES, 0, 3);
-
         c.glfwSwapBuffers(window);
         c.glfwPollEvents();
     }
