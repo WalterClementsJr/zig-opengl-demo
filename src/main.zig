@@ -11,8 +11,8 @@ var stdout = std.fs.File.stdout().writer(&.{});
 
 pub const isDebug = if (builtin.mode == .ReleaseFast) c.GL_FALSE else c.GL_TRUE;
 
-fn createShaderProgram() glad.GLuint {
-    const vertexShader: []const u8 =
+fn createShaderProgram() !glad.GLuint {
+    const vertexSource: []const u8 =
         \\#version 410 core
         \\
         \\in vec3 vp;
@@ -21,38 +21,80 @@ fn createShaderProgram() glad.GLuint {
         \\  gl_Position = vec4( vp, 1.0 );
         \\}
     ;
-    const fragmentShader: []const u8 =
+    const fragmentSource: []const u8 =
         \\#version 410 core
         \\
         \\out vec4 frag_colour;
         \\
         \\void main() {
-        \\  frag_colour = vec4( 0.5, 0.0, 0.5, 1.0 );
+        \\  frag_colour = vec4( 0.1, 0.0, 0.9, 1.0 );
         \\}
     ;
-    var vertexPtr: [*c]const u8 = @ptrCast(vertexShader.ptr);
-    const vertexPtrPtr: [*c][*c]const u8 = @ptrCast(&vertexPtr);
-    var vertexShaderLen: glad.GLint = @intCast(vertexShader.len);
+    const vertexShader = try initShader(vertexSource, "vertex", glad.GL_VERTEX_SHADER);
+    const fragmentShader = try initShader(fragmentSource, "fragment", glad.GL_FRAGMENT_SHADER);
 
-    const vs: glad.GLuint = glad.glCreateShader(c.GL_VERTEX_SHADER);
-    glad.glShaderSource(vs, 1, vertexPtrPtr, &vertexShaderLen);
-    glad.glCompileShader(vs);
+    defer glad.glDeleteShader(vertexShader);
+    defer glad.glDeleteShader(fragmentShader);
 
+    const shaderProgram: glad.GLuint = glad.glCreateProgram();
+    glad.glAttachShader(shaderProgram, vertexShader);
+    glad.glAttachShader(shaderProgram, fragmentShader);
+    glad.glLinkProgram(shaderProgram);
 
-    var fragPtr: [*c]const u8 = @ptrCast(fragmentShader.ptr);
-    const fragPtrPtr: [*c][*c]const u8 = @ptrCast(&fragPtr);
-    var fragShaderLen: glad.GLint = @intCast(fragmentShader.len);
+    var ok: c.GLint = undefined;
+    glad.glGetProgramiv(shaderProgram, c.GL_LINK_STATUS, &ok);
 
-    const fs: glad.GLuint = glad.glCreateShader(glad.GL_FRAGMENT_SHADER);
-    glad.glShaderSource(fs, 1, fragPtrPtr, &fragShaderLen);
-    glad.glCompileShader(fs);
+    if (ok == c.GL_TRUE) return shaderProgram;
+    // or panic
+    defer @panic("Program linking failed");
 
-    const shader_program: glad.GLuint = glad.glCreateProgram();
-    glad.glAttachShader(shader_program, fs);
-    glad.glAttachShader(shader_program, vs);
-    glad.glLinkProgram(shader_program);
+    var errorSize: c.GLint = undefined;
+    glad.glGetProgramiv(shaderProgram, c.GL_INFO_LOG_LENGTH, &errorSize);
 
-    return shader_program;
+    if (errorSize == 0) {
+        return shaderProgram;
+    }
+    var gpa = std.heap.page_allocator;
+    const message = try gpa.alloc(u8, @intCast(errorSize));
+    defer gpa.free(message);
+
+    var written: c.GLsizei = 0;
+    glad.glGetProgramInfoLog(shaderProgram, errorSize, &written, message.ptr);
+
+    try stdout.interface.print("Error linking shader program: {s}\n", .{message});
+    return shaderProgram;
+}
+
+fn initShader(source: []const u8, name: []const u8, shaderType: glad.GLenum) !c.GLuint {
+    var ptr: [*c]const u8 = @ptrCast(source.ptr);
+    const ptrPtr: [*c][*c]const u8 = @ptrCast(&ptr);
+    var shaderLen: glad.GLint = @intCast(source.len);
+
+    const shaderId: glad.GLuint = glad.glCreateShader(shaderType);
+    glad.glShaderSource(shaderId, 1, ptrPtr, &shaderLen);
+    glad.glCompileShader(shaderId);
+
+    // get shader compilation result
+    var ok: c.GLint = undefined;
+    glad.glGetShaderiv(shaderId, c.GL_COMPILE_STATUS, &ok);
+
+    if (ok == c.GL_TRUE) return shaderId;
+    // or panic
+    defer @panic("Shader failed compiling");
+
+    var errorSize: c.GLint = undefined;
+    glad.glGetShaderiv(shaderId, c.GL_INFO_LOG_LENGTH, &errorSize);
+
+    if (errorSize == 0) {
+        return shaderId;
+    }
+    var gpa = std.heap.page_allocator;
+    const message = try gpa.alloc(u8, @intCast(errorSize));
+    defer gpa.free(message);
+
+    var written: c.GLsizei = 0;
+    glad.glGetShaderInfoLog(shaderId, errorSize, &written, message.ptr);
+    try stdout.interface.print("Error compiling shader {s}: {s}\n", .{name, message});
 }
 
 fn gladLoader(name: [*c]const u8) callconv(.c) ?*anyopaque {
@@ -84,7 +126,7 @@ pub fn main() !u8 {
 
     c.glfwSetInputMode(window, c.GLFW_STICKY_KEYS, c.GL_TRUE);
 
-    const shaderProgram = createShaderProgram();
+    const shaderProgram = try createShaderProgram();
 
     while ((c.glfwGetKey(window, c.GLFW_KEY_ESCAPE) != c.GLFW_PRESS) & (c.glfwWindowShouldClose(window) == 0)) {
         c.glClear(c.GL_COLOR_BUFFER_BIT | c.GL_DEPTH_BUFFER_BIT);
