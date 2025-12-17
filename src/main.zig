@@ -6,33 +6,16 @@ const glad = @cImport({
     @cInclude("glad/glad.h");
 });
 const builtin = @import("builtin");
-const matrix = @import("./math3d.zig");
+const glmath = @import("./math3d.zig");
+const shaderSrc = @import("./shader.zig");
 
 var stdout = std.fs.File.stdout().writer(&.{});
 
 pub const isDebug = if (builtin.mode == .ReleaseFast) c.GL_FALSE else c.GL_TRUE;
 
 fn createShaderProgram() !glad.GLuint {
-    const vertexSource: []const u8 =
-        \\#version 410 core
-        \\
-        \\in vec3 vp;
-        \\
-        \\void main() {
-        \\  gl_Position = vec4( vp, 1.0 );
-        \\}
-    ;
-    const fragmentSource: []const u8 =
-        \\#version 410 core
-        \\
-        \\out vec4 frag_colour;
-        \\
-        \\void main() {
-        \\  frag_colour = vec4( 0.1, 0.0, 0.9, 1.0 );
-        \\}
-    ;
-    const vertexShader = try initShader(vertexSource, "vertex", glad.GL_VERTEX_SHADER);
-    const fragmentShader = try initShader(fragmentSource, "fragment", glad.GL_FRAGMENT_SHADER);
+    const vertexShader = try initShader(shaderSrc.vertex1, "vertex", glad.GL_VERTEX_SHADER);
+    const fragmentShader = try initShader(shaderSrc.fragment1, "fragmentColor", glad.GL_FRAGMENT_SHADER);
 
     defer glad.glDeleteShader(vertexShader);
     defer glad.glDeleteShader(fragmentShader);
@@ -44,7 +27,6 @@ fn createShaderProgram() !glad.GLuint {
 
     var ok: c.GLint = undefined;
     glad.glGetProgramiv(shaderProgram, c.GL_LINK_STATUS, &ok);
-
     if (ok == c.GL_TRUE) return shaderProgram;
     // or panic
     defer @panic("Program linking failed");
@@ -114,6 +96,7 @@ pub fn main() !u8 {
     c.glfwWindowHint(c.GLFW_OPENGL_FORWARD_COMPAT, c.GL_TRUE);
     c.glfwWindowHint(c.GLFW_OPENGL_PROFILE, c.GLFW_OPENGL_CORE_PROFILE);
     c.glfwWindowHint(c.GLFW_RESIZABLE, c.GL_FALSE);
+    c.glViewport(0, 0, 700, 500);
 
     const window: ?*c.GLFWwindow = c.glfwCreateWindow(800, 600, "OpenGL sphere cube demo", null, null) orelse @panic("Cannot create GLFW window");
     defer c.glfwDestroyWindow(window);
@@ -122,7 +105,7 @@ pub fn main() !u8 {
 
     // init GLAD
     if (glad.gladLoadGLLoader(gladLoader) != c.GL_TRUE) {
-        @panic("GLAD failed");
+        @panic("OpenGL extension linking failed");
     }
 
     c.glfwSetInputMode(window, c.GLFW_STICKY_KEYS, c.GL_TRUE);
@@ -130,12 +113,13 @@ pub fn main() !u8 {
     const shaderProgram = try createShaderProgram();
 
     // Put the shader program, and the VAO, in focus in OpenGL's state machine.
-    const mat3 = matrix.Matrix(3, 3).init([_][3]f32{
+    const mat3 = glmath.Matrix(3, 3).init([_][3]f32{
         [_]f32{ 0.0, 0.5, 0.0 },
         [_]f32{ 0.5, -0.5, 0.0 },
         [_]f32{ -0.5, -0.5, 0.0 },
     });
-    const elements = mat3.flatten();
+    // const spin = mat3.rotate(20.0, glmath.Vector(3).init(.{ 1.0, 1.0, 1.0 }));
+    var elements = mat3.flatten();
 
     var vbo: c.GLuint = 0;
     glad.glGenBuffers(1, &vbo);
@@ -148,14 +132,23 @@ pub fn main() !u8 {
     glad.glEnableVertexAttribArray(0);
     glad.glBindBuffer(c.GL_ARRAY_BUFFER, vbo);
     glad.glVertexAttribPointer(0, 3, c.GL_FLOAT, c.GL_FALSE, 0, null);
-    glad.glUseProgram(shaderProgram);
-    glad.glBindVertexArray(vao);
 
     // Draw points 0-3 from the currently bound VAO with current in-use shader.
     while ((c.glfwGetKey(window, c.GLFW_KEY_ESCAPE) != c.GLFW_PRESS) & (c.glfwWindowShouldClose(window) == 0)) {
         c.glClear(c.GL_COLOR_BUFFER_BIT | c.GL_DEPTH_BUFFER_BIT);
+        // elements[1] += 1.0;
+        glad.glUseProgram(shaderProgram);
 
+        const timeValue = c.glfwGetTime();
+        const greenValue = (@sin(timeValue) / 2.0) + 0.5;
+        const vertexColorLocation = glad.glGetUniformLocation(shaderProgram, "InFragColor");
+        glad.glUseProgram(shaderProgram);
+        glad.glUniform4f(vertexColorLocation, 0.0, @floatCast(greenValue), 0.0, 1.0);
+
+
+        glad.glBindVertexArray(vao);
         glad.glDrawArrays(glad.GL_TRIANGLES, 0, 3);
+
         c.glfwSwapBuffers(window);
         c.glfwPollEvents();
     }
