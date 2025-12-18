@@ -18,7 +18,7 @@ pub fn Matrix(comptime x: u8, comptime y: u8) type {
     return struct {
         const Self = @This();
 
-        const identityMatrix = Matrix(4, 4).init(
+        pub const identityMatrix = Matrix(4, 4).init(
             [_][4]f32{
                 [_]f32{ 1, 0, 0, 0 },
                 [_]f32{ 0, 1, 0, 0 },
@@ -37,6 +37,24 @@ pub fn Matrix(comptime x: u8, comptime y: u8) type {
             };
         }
 
+        pub fn initFlat(items: [x * y]f32) Self {
+            var @"2dVal": [x][y]f32 = undefined;
+
+            var row: u8 = 0;
+            var col: u8 = 0;
+
+            for (items) |item| {
+                @"2dVal"[row][col] = item;
+                col += 1;
+                if (col == y) {
+                    col = 0;
+                    row += 1;
+                }
+            }
+            return Self{
+                .val = @"2dVal",
+            };
+        }
         pub fn init(items: [x][y]f32) Self {
             return Self{
                 .val = items,
@@ -44,14 +62,15 @@ pub fn Matrix(comptime x: u8, comptime y: u8) type {
         }
 
         /// rotating 4x4 matrices
-        pub fn rotate(o1: Matrix(4, 4), distance: f32, axis: Vector(3)) Matrix(4, 4) {
+        pub fn rotate4x4(o1: Matrix(4, 4), angleDeg: f32, axis: Vector(3)) Matrix(4, 4) {
             const normalized = axis.normalize();
+            const angleRadian = angleDeg * (math.pi / 180);
             const nx = normalized[0];
             const ny = normalized[1];
             const nz = normalized[2];
 
-            const cos = math.cos(distance);
-            const sin = math.sin(distance);
+            const cos = math.cos(angleRadian);
+            const sin = math.sin(angleRadian);
             const t = 1 - cos;
 
             const @"3dRotationalMatrix" = Matrix(4, 4).init([_][4]f32{
@@ -63,15 +82,17 @@ pub fn Matrix(comptime x: u8, comptime y: u8) type {
             return Matrix(4, 4).multiply(4, 4, 4, o1, @"3dRotationalMatrix");
         }
 
-        pub fn transform(self: Self, vertex: Vector(x)) Vector(x) {
-            var result = Vector(x).initZero();
+        pub fn orthoProjection(left: f32, right: f32, bottom: f32, top: f32, zNear: f32, zFar: f32) Matrix(4, 4) {
+            var perspective = identityMatrix;
 
-            for (0..x) |i| {
-                for (0..y) |j| {
-                    result.val[i] += self.val[i][j] * vertex.val[j];
-                }
-            }
-            return result;
+            perspective.val[0][0] = 2 / (right - left);
+            perspective.val[1][1] = 2 / (top - bottom);
+            perspective.val[2][2] = -2 / (zFar - zNear);
+            perspective.val[0][3] = -(right + left) / (right - left);
+            perspective.val[1][3] = -(top + bottom) / (top - bottom);
+            perspective.val[2][3] = -(zFar + zNear) / (zFar - zNear);
+
+            return perspective;
         }
 
         pub fn flatten(self: Self) [x * y]f32 {
@@ -92,14 +113,25 @@ pub fn Matrix(comptime x: u8, comptime y: u8) type {
             return x * y;
         }
 
-        pub fn scale(self: Matrix(x, y), vector: Vector(y)) Vector(x) {
-            const matYx1: Matrix(y, 1) = vector.toMatrix();
-            const matResult: Matrix(x, 1) = multiply(x, y, 1, self, matYx1);
-
+        pub fn transform(self: Self, vertex: Vector(y)) Vector(x) {
             var result = Vector(x).initZero();
 
             for (0..x) |i| {
-                result.val[i] = matResult.val[i][0];
+                for (0..y) |j| {
+                    result.val[i] += self.val[i][j] * vertex.val[j];
+                }
+            }
+            return result;
+        }
+
+        pub fn scale(self: Matrix(x, y), vector: Vector(y)) Vector(x) {
+            var result = Vector(x).initZero();
+            for (0..x) |i| {
+                var sum: f32 = 0;
+                for (0..y) |j| {
+                    sum += self.val[i][j] * vector.val[j];
+                }
+                result.val[i] = sum;
             }
             return result;
         }
@@ -120,6 +152,39 @@ pub fn Matrix(comptime x: u8, comptime y: u8) type {
                 }
             }
             return result;
+        }
+
+        pub fn lookAt(eye: Vector(3), center: Vector(3), up: Vector(3)) Matrix(4, 4) {
+            var Z = eye.subtract(center);
+            Z = Z.normalize();
+            var Y = up;
+            var X = Y.cross(Z);
+            Y = Z.cross(X);
+            X = X.normalize();
+            Y = Y.normalize();
+
+            var M = identityMatrix;
+            M.val[0][0] = X.val[0];
+            M.val[0][1] = X.val[1];
+            M.val[0][2] = X.val[2];
+            M.val[0][3] = -1 * X.dot(eye);
+
+            M.val[1][0] = Y.val[0];
+            M.val[1][1] = Y.val[1];
+            M.val[1][2] = Y.val[2];
+            M.val[1][3] = -1 * Y.dot(eye);
+
+            M.val[2][0] = Z.val[0];
+            M.val[2][1] = Z.val[1];
+            M.val[2][2] = Z.val[2];
+            M.val[2][3] = -Z.dot(eye);
+
+            M.val[3][0] = 0;
+            M.val[3][1] = 0;
+            M.val[3][2] = 0;
+            M.val[3][3] = 1.0;
+
+            return M;
         }
 
         pub fn subtract(self: Matrix(x, y), other: Matrix(x, y)) Matrix(x, y) {
@@ -196,8 +261,25 @@ pub fn Vector(comptime size: u8) type {
             return self.val;
         }
 
-        pub fn len() u8 {
+        pub fn len(self: Self) u8 {
+            _ = self;
             return size;
+        }
+
+        pub fn subtract(self: Vector(size), other: Vector(size)) Vector(size) {
+            var res = Vector(size){};
+            for (0..size) |i| {
+                res.val[i] = self.val[i] - other.val[i];
+            }
+            return res;
+        }
+
+        pub fn add(self: Vector(size), other: Vector(size)) Vector(size) {
+            var res = Vector(size){};
+            for (0..size) |i| {
+                res.val[i] = self.val[i] + other.val[i];
+            }
+            return res;
         }
 
         pub fn normalize(self: Self) Vector(size) {
@@ -209,7 +291,7 @@ pub fn Vector(comptime size: u8) type {
 
             var result = Self.initZero();
             for (0..size) |i| {
-                result.val[i] = self[i] / length;
+                result.val[i] = self.val[i] / vectorLen;
             }
             return result;
         }
@@ -222,10 +304,10 @@ pub fn Vector(comptime size: u8) type {
             return math.sqrt(acc);
         }
 
-        pub fn cross(o1: Vector(3), o2: Vector(3)) Vector(3) {
-            const ax = o1.val[0];
-            const ay = o1.val[1];
-            const az = o1.val[2];
+        pub fn cross(self: Self, o2: Vector(3)) Vector(3) {
+            const ax = self.val[0];
+            const ay = self.val[1];
+            const az = self.val[2];
 
             const bx = o2.val[0];
             const by = o2.val[1];
@@ -263,18 +345,16 @@ pub fn Vector(comptime size: u8) type {
 const testing = std.testing;
 
 test "matrix transformation" {
-    var mat = Matrix(4, 4).init(
-        [_][4]f32{
-            [_]f32{ 1.0, 1.0, 1.0, 1.0 },
-            [_]f32{ 2.0, 2.0, 2.0, 2.0 },
-            [_]f32{ 1.0, 1.0, 1.0, 1.0 },
-            [_]f32{ 4.0, 4.0, 4.0, 4.0 },
-        },
-    );
-    const vec = Vector(4).init(.{ 1.0, 2.0, 1.0, 1.0 });
+    var mat = Matrix(4, 4).initFlat(.{
+        1, 2, 3, 4,
+        5, 6, 7, 8,
+        9, 1, 2, 3,
+        4, 5, 6, 7,
+    });
+    const vec = Vector(4).init(.{ 1, 2, 3, 4 });
 
     try testing.expectEqual(
-        Vector(4){ .val = [_]f32{ 5.0, 10.0, 5.0, 20.0 } },
+        Vector(4){ .val = [_]f32{ 30, 70, 29, 60 } },
         mat.transform(vec),
     );
 }
@@ -315,11 +395,7 @@ test "matrix multiply" {
         ),
     ));
 
-    try testing.expectEqual(Matrix(3, 1).init([_][1]f32{
-        [_]f32{0},
-        [_]f32{3},
-        [_]f32{3},
-    }), Matrix(3, 2).multiply(
+    try testing.expectEqual(Matrix(3, 1).initFlat(.{ 0, 3, 3 }), Matrix(3, 1).multiply(
         3,
         2,
         1,
@@ -337,6 +413,111 @@ test "matrix multiply" {
             },
         ),
     ));
+
+    const A = Matrix(3, 2).init(
+        [_][2]f32{
+            [_]f32{ 1, 2 },
+            [_]f32{ 3, 4 },
+            [_]f32{ 5, 6 },
+        },
+    );
+
+    const I2 = Matrix(2, 2).init(
+        [_][2]f32{
+            [_]f32{ 1, 0 },
+            [_]f32{ 0, 1 },
+        },
+    );
+
+    try testing.expectEqual(
+        A,
+        Matrix(3, 2).multiply(
+            3,
+            2,
+            2,
+            A,
+            I2,
+        ),
+    );
+    const I3 = Matrix(3, 3).init(
+        [_][3]f32{
+            [_]f32{ 1, 0, 0 },
+            [_]f32{ 0, 1, 0 },
+            [_]f32{ 0, 0, 1 },
+        },
+    );
+
+    try testing.expectEqual(
+        A,
+        Matrix(3, 2).multiply(
+            3,
+            3,
+            2,
+            I3,
+            A,
+        ),
+    );
+}
+
+test "matrix multiplication association" {
+    const A = Matrix(2, 3).initFlat(.{
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+    });
+
+    const B = Matrix(3, 2).initFlat(.{
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+    });
+
+    const C = Matrix(2, 2).initFlat(.{
+        1,
+        2,
+        3,
+        4,
+    });
+
+    const AB = Matrix(2, 2).multiply(
+        2,
+        3,
+        2,
+        A,
+        B,
+    );
+
+    const left = Matrix(2, 2).multiply(
+        2,
+        2,
+        2,
+        AB,
+        C,
+    );
+
+    const BC = Matrix(3, 2).multiply(
+        3,
+        2,
+        2,
+        B,
+        C,
+    );
+
+    const right = Matrix(2, 2).multiply(
+        2,
+        3,
+        2,
+        A,
+        BC,
+    );
+
+    try testing.expectEqual(left, right);
 }
 
 test "matrix properties" {
@@ -349,59 +530,60 @@ test "matrix properties" {
     try testing.expectEqual(6, mat.totalElements());
 }
 
-test "matrix equality" {
-    try testing.expectEqual(true, (&Matrix(4, 4){
-        .val = [_][4]f32{
-            [_]f32{ 1.0, 0.0, 0.0, 0.0 },
-            [_]f32{ 0.0, 0.0, 0.0, 0.0 },
-            [_]f32{ 0.0, 0.0, 0.0, 0.0 },
-            [_]f32{ 0.0, 0.0, 0.0, 0.0 },
-        },
-    }).eq(Matrix(4, 4){
-        .val = [_][4]f32{
-            [_]f32{ 1.0, 0.0, 0.0, 0.0 },
-            [_]f32{ 0.0, 0.0, 0.0, 0.0 },
-            [_]f32{ 0.0, 0.0, 0.0, 0.0 },
-            [_]f32{ 0.0, 0.0, 0.0, 0.0 },
-        },
-    }));
+test "matrix projection lookAt" {
+    try testing.expectEqual(
+        Matrix(4, 4).lookAt(
+            Vector(3).init(.{ 0, 0, 1 }),
+            Vector(3).init(.{ 0, 0, 0 }),
+            Vector(3).init(.{ 0, 1, 0 }),
+        ),
+        Matrix(4, 4).initFlat(.{
+            1, 0, 0, 0,
+            0, 1, 0, 0,
+            0, 0, 1, -1,
+            0, 0, 0, 1,
+        }),
+    );
+}
 
-    try testing.expectEqual(false, (&Matrix(4, 4){
-        .val = [_][4]f32{
-            [_]f32{ 0.0, 0.0, 0.0, 0.0 },
-            [_]f32{ 0.0, 0.0, 0.0, 0.0 },
-            [_]f32{ 0.0, 0.0, 0.0, 0.0 },
-            [_]f32{ 0.0, 0.0, 0.0, 0.0 },
-        },
-    }).eq(Matrix(4, 4){
-        .val = [_][4]f32{
-            [_]f32{ 2.0, 0.0, 0.0, 0.0 },
-            [_]f32{ 0.0, 0.0, 0.0, 0.0 },
-            [_]f32{ 0.0, 0.0, 0.0, 0.0 },
-            [_]f32{ 0.0, 0.0, 0.0, 0.0 },
-        },
-    }));
+test "matrix ortho" {
+    try testing.expectEqual(
+        Matrix(4, 4).initFlat(.{
+            0.1, 0,   0,     0,
+            0,   0.1, 0,     0,
+            0,   0,   -0.02, -1,
+            0,   0,   0,     1,
+        }),
+        Matrix(4, 4).orthoProjection(-10, 10, -10, 10, 0, 100),
+    );
 }
 
 test "generic vector" {
-    try testing.expectEqual(3, Vector(3).len());
-    try testing.expectEqual(5, Vector(5).len());
-
     var v3 = Vector(3).init(.{ 1.0, 2.0, 3.0 });
     try testing.expectEqual(3, v3.values().len);
+    try testing.expectEqual(3, v3.len());
     try testing.expectEqual(1.0, v3.values()[0]);
     try testing.expectEqual(2.0, v3.values()[1]);
     try testing.expectEqual(3.0, v3.values()[2]);
 }
 
-test "cross product" {
+test "vector cross product" {
     const va = Vector(3).init(.{ 1, 2, 3 });
     const vb = Vector(3).init(.{ 4, 5, 6 });
     try testing.expectEqual(Vector(3).init(.{ -3, 6, -3 }), Vector(3).cross(va, vb));
 }
 
 test "vector dot product" {
-    try testing.expectEqual(32, Vector(3).dot(Vector(3).init(.{ 1, 2, 3 }), Vector(3).init(.{ 4, 5, 6 })));
+    try testing.expectEqual(32, Vector(3).init(.{ 1, 2, 3 }).dot(Vector(3).init(.{ 4, 5, 6 })));
+}
+
+test "vector normalize" {
+    const actual = Vector(3).init(.{ 0.26726124, 0.5345225, 0.8017837 });
+    const res = Vector(3).init(.{ 1, 2, 3 }).normalize();
+
+    for (actual.val, res.val) |e, r| {
+        try std.testing.expectApproxEqAbs(e, r, 0.0001);
+    }
 }
 
 test "vector to matrix" {
@@ -415,6 +597,12 @@ test "vector to matrix" {
 test "vector length" {
     var v3 = Vector(3).init(.{ 1, 2, 3 });
     try testing.expectEqual(@sqrt(14.0), v3.length());
+}
+
+test "vector subtract" {
+    const v1 = Vector(3).init(.{ 1, 2, 3 });
+    const v2 = Vector(3).init(.{ 4, 5, 6 });
+    try testing.expectEqual(Vector(3).init(.{ -3, -3, -3 }), v1.subtract(v2));
 }
 
 test "vector scalar" {

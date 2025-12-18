@@ -7,6 +7,8 @@ const glad = @cImport({
 });
 const builtin = @import("builtin");
 const glmath = @import("./math3d.zig");
+const Matrix = glmath.Matrix;
+const Vector = glmath.Vector;
 const shaderSrc = @import("./shader.zig");
 
 var stdout = std.fs.File.stdout().writer(&.{});
@@ -25,6 +27,7 @@ fn createShaderProgram() !glad.GLuint {
     glad.glAttachShader(shaderProgram, fragmentShader);
     glad.glLinkProgram(shaderProgram);
 
+    // debug
     var ok: c.GLint = undefined;
     glad.glGetProgramiv(shaderProgram, c.GL_LINK_STATUS, &ok);
     if (ok == c.GL_TRUE) return shaderProgram;
@@ -96,9 +99,10 @@ pub fn main() !u8 {
     c.glfwWindowHint(c.GLFW_OPENGL_FORWARD_COMPAT, c.GL_TRUE);
     c.glfwWindowHint(c.GLFW_OPENGL_PROFILE, c.GLFW_OPENGL_CORE_PROFILE);
     c.glfwWindowHint(c.GLFW_RESIZABLE, c.GL_FALSE);
-    c.glViewport(0, 0, 700, 500);
+    const width = 800;
+    const height = 600;
 
-    const window: ?*c.GLFWwindow = c.glfwCreateWindow(800, 600, "OpenGL sphere cube demo", null, null) orelse @panic("Cannot create GLFW window");
+    const window: ?*c.GLFWwindow = c.glfwCreateWindow(width, height, "OpenGL sphere cube demo", null, null) orelse @panic("Cannot create GLFW window");
     defer c.glfwDestroyWindow(window);
 
     c.glfwMakeContextCurrent(window);
@@ -109,22 +113,21 @@ pub fn main() !u8 {
     }
 
     c.glfwSetInputMode(window, c.GLFW_STICKY_KEYS, c.GL_TRUE);
-
+    c.glFrontFace(c.GL_CW);
     const shaderProgram = try createShaderProgram();
 
+    glad.glUseProgram(shaderProgram);
     // Put the shader program, and the VAO, in focus in OpenGL's state machine.
-    const mat3 = glmath.Matrix(3, 3).init([_][3]f32{
-        [_]f32{ 0.0, 0.5, 0.0 },
-        [_]f32{ 0.5, -0.5, 0.0 },
-        [_]f32{ -0.5, -0.5, 0.0 },
+    const mat3 = glmath.Matrix(3, 3).initFlat(.{
+        -1, -1, 0,
+        1,  -1, 0,
+        0,  4, 0,
     });
-    // const spin = mat3.rotate(20.0, glmath.Vector(3).init(.{ 1.0, 1.0, 1.0 }));
-    var elements = mat3.flatten();
 
     var vbo: c.GLuint = 0;
     glad.glGenBuffers(1, &vbo);
     glad.glBindBuffer(c.GL_ARRAY_BUFFER, vbo);
-    glad.glBufferData(c.GL_ARRAY_BUFFER, elements.len * @sizeOf(f32), &elements, c.GL_STATIC_DRAW);
+    glad.glBufferData(c.GL_ARRAY_BUFFER, @intCast(mat3.totalElements() * @sizeOf(f32)), &mat3.val[0][0], c.GL_STATIC_DRAW);
 
     var vao: c.GLuint = 0;
     glad.glGenVertexArrays(1, &vao);
@@ -133,21 +136,36 @@ pub fn main() !u8 {
     glad.glBindBuffer(c.GL_ARRAY_BUFFER, vbo);
     glad.glVertexAttribPointer(0, 3, c.GL_FLOAT, c.GL_FALSE, 0, null);
 
-    // Draw points 0-3 from the currently bound VAO with current in-use shader.
+    // Model, view, Projection set up
+    const projection = glmath.Matrix(4, 4).orthoProjection(-10, 10, -10, 10, 0, 100);
+
+    const view = glmath.Matrix(4, 4).lookAt(
+        Vector(3).init(.{ 4, 3, 3 }),
+        Vector(3).init(.{ 0, 0, 0 }),
+        Vector(3).init(.{ 0, 1, 0 }),
+    );
+
+    const model = Matrix(4, 4).identityMatrix;
+    const mvp: Matrix(4, 4) = Matrix(4, 4).multiply(4, 4, 4, projection, Matrix(4, 4).multiply(4, 4, 4, view, model));
+
+    const matrixId = glad.glGetUniformLocation(shaderProgram, "MVP");
+
+    glad.glUniformMatrix4fv(matrixId, 1, c.GL_TRUE, &mvp.val[0][0]); // enable transpose
+
     while ((c.glfwGetKey(window, c.GLFW_KEY_ESCAPE) != c.GLFW_PRESS) & (c.glfwWindowShouldClose(window) == 0)) {
-        c.glClear(c.GL_COLOR_BUFFER_BIT | c.GL_DEPTH_BUFFER_BIT);
-        // elements[1] += 1.0;
+        glad.glClearColor(0.2, 0.3, 0.3, 1.0);
+        glad.glClear(c.GL_COLOR_BUFFER_BIT | c.GL_DEPTH_BUFFER_BIT);
         glad.glUseProgram(shaderProgram);
+        const greenValue = @sin(c.glfwGetTime()) + 0.5;
 
-        const timeValue = c.glfwGetTime();
-        const greenValue = (@sin(timeValue) / 2.0) + 0.5;
         const vertexColorLocation = glad.glGetUniformLocation(shaderProgram, "InFragColor");
-        glad.glUseProgram(shaderProgram);
-        glad.glUniform4f(vertexColorLocation, 0.0, @floatCast(greenValue), 0.0, 1.0);
+        const colorVector = glmath.Vector(4).init(.{ @floatCast(greenValue), 0, 0, 1 });
 
+        glad.glUseProgram(shaderProgram);
+        glad.glUniform4fv(vertexColorLocation, 1, &colorVector.val[0]);
 
         glad.glBindVertexArray(vao);
-        glad.glDrawArrays(glad.GL_TRIANGLES, 0, 3);
+        glad.glDrawArrays(glad.GL_TRIANGLE_STRIP, 0, 3);
 
         c.glfwSwapBuffers(window);
         c.glfwPollEvents();
