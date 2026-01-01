@@ -64,10 +64,10 @@ pub fn Matrix(comptime x: u8, comptime y: u8) type {
         /// rotating 4x4 matrices
         pub fn rotate4x4(o1: Matrix(4, 4), angleDeg: f32, axis: Vector(3)) Matrix(4, 4) {
             const normalized = axis.normalize();
-            const angleRadian = angleDeg * (math.pi / 180);
-            const nx = normalized[0];
-            const ny = normalized[1];
-            const nz = normalized[2];
+            const angleRadian: f32 = angleDeg * (math.pi / 180.0);
+            const nx = normalized.val[0];
+            const ny = normalized.val[1];
+            const nz = normalized.val[2];
 
             const cos = math.cos(angleRadian);
             const sin = math.sin(angleRadian);
