@@ -2,6 +2,7 @@ const std = @import("std");
 const c = @cImport({
     @cInclude("GLFW/glfw3.h");
 });
+const math = std.math;
 const glad = @cImport({
     @cInclude("glad/glad.h");
 });
@@ -99,13 +100,30 @@ pub fn main() !u8 {
     c.glfwWindowHint(c.GLFW_OPENGL_FORWARD_COMPAT, c.GL_TRUE);
     c.glfwWindowHint(c.GLFW_OPENGL_PROFILE, c.GLFW_OPENGL_CORE_PROFILE);
     c.glfwWindowHint(c.GLFW_RESIZABLE, c.GL_FALSE);
-    const width = 800;
-    const height = 600;
 
-    const window: ?*c.GLFWwindow = c.glfwCreateWindow(width, height, "OpenGL sphere/cube demo", null, null) orelse @panic("Cannot create GLFW window");
+    var state = ProgramState{
+        .WIDTH = 800,
+        .HEIGHT = 600,
+        .FPS = 30,
+        .lastTime = std.time.milliTimestamp(),
+        .mouseSpeed = 0.005,
+        .moveSpeed = 3,
+        .position = Vector(3).init(.{ 0, 0, 5 }),
+        // horizontal angle : toward -Z
+        .horizontalAngle = 3.14,
+        // vertical angle : 0, look at the horizon
+        .verticalAngle = 0.0,
+        // Initial Field of View
+        // const initialFoV: f32 = 45.0;
+    };
+
+    const mainTitle = "OpenGL sphere/cube demo";
+    const window: ?*c.GLFWwindow = c.glfwCreateWindow(@intCast(state.WIDTH), @intCast(state.HEIGHT), mainTitle, null, null) orelse @panic("Cannot create GLFW window");
     defer c.glfwDestroyWindow(window);
 
     c.glfwMakeContextCurrent(window);
+
+    state.window = window;
 
     // init GLAD
     if (glad.gladLoadGLLoader(gladLoader) != c.GL_TRUE) {
@@ -117,9 +135,7 @@ pub fn main() !u8 {
     const shaderProgram = try createShaderProgram();
 
     glad.glUseProgram(shaderProgram);
-
     // Put the shader program, and the VAO, in focus in OpenGL's state machine.
-    //
     var triangle = Matrix(3, 3).initFlat(.{
         -2, -2, 10,
         2,  -2, 10,
@@ -226,24 +242,41 @@ pub fn main() !u8 {
 
     c.glEnable(c.GL_DEPTH_TEST);
     c.glDepthFunc(c.GL_LESS);
-
-    // Model, view, Projection set up
-    const projection = glmath.Matrix(4, 4).orthoProjection(-10, 10, -10, 10, 0, 100);
-    const view = glmath.Matrix(4, 4).lookAt(
-        Vector(3).init(.{ 1, 1, -3 }),
-        Vector(3).init(.{ 0, 0, 0 }),
-        Vector(3).init(.{ 0, 1, 0 }),
-    );
-    const model = Matrix(4, 4).identityMatrix;
+    c.glEnable(c.GL_CULL_FACE);
 
     const mvpId = glad.glGetUniformLocation(shaderProgram, "MVP");
 
+    // Model, view, Projection set up
+    const projection = glmath.Matrix(4, 4).orthoProjection(-10, 10, -10, 10, 0, 100);
+    const model = Matrix(4, 4).identityMatrix;
+    var view: Matrix(4, 4) = undefined;
+
+    var lastTime: f64 = 0;
+    var currentTime: f64 = 0;
+    var nbFrames: usize = 0;
     // render loop
     while ((c.glfwGetKey(window, c.GLFW_KEY_ESCAPE) != c.GLFW_PRESS) & (c.glfwWindowShouldClose(window) == 0)) {
-        glad.glClearColor(0.2, 0.3, 0.3, 1.0);
+        glad.glClearColor(0, 0.1, 0.1, 1);
         glad.glClear(c.GL_COLOR_BUFFER_BIT | c.GL_DEPTH_BUFFER_BIT);
         glad.glUseProgram(shaderProgram);
 
+        // fps counting
+        // Measure speed
+        currentTime = c.glfwGetTime();
+        nbFrames += 1;
+        const timePerFrame = 1000.0 / @as(f32, @floatFromInt(nbFrames));
+        const timeDiff = currentTime - lastTime;
+        if (timeDiff >= 1.0 / @as(f32, @floatFromInt(state.FPS))) {
+            var title: [70]u8 = undefined;
+            const fps: f64 = 1.0 / timeDiff * @as(f64, @floatFromInt(nbFrames));
+            const out = try std.fmt.bufPrint(&title, "{s}: {d} fps | {d} ms/frame", .{ mainTitle, fps, timePerFrame });
+            title[out.len] = 0;
+            c.glfwSetWindowTitle(state.window, &title);
+            nbFrames += 1;
+            lastTime = currentTime;
+            nbFrames = 0;
+            computeMatricesFromInput(&state, &view);
+        }
         const mvp: Matrix(4, 4) = Matrix(4, 4).multiply(4, 4, 4, projection, Matrix(4, 4).multiply(4, 4, 4, view, model));
         glad.glUniformMatrix4fv(mvpId, 1, c.GL_TRUE, &mvp.val[0][0]); // enable transpose
 
@@ -286,4 +319,79 @@ pub fn main() !u8 {
     glad.glDeleteVertexArrays(1, &vertexArrayId);
 
     return 0;
+}
+
+const ProgramState = struct {
+    WIDTH: usize,
+    HEIGHT: usize,
+    FPS: usize,
+    lastTime: i64,
+    window: ?*c.GLFWwindow = undefined,
+    mouseSpeed: f32,
+    moveSpeed: f32,
+    position: Vector(3) = undefined,
+    horizontalAngle: f32 = undefined,
+    verticalAngle: f32 = undefined,
+};
+
+fn computeMatricesFromInput(state: *ProgramState, view: *Matrix(4, 4)) void {
+    var mouseX: f64 = undefined;
+    var mouseY: f64 = undefined;
+
+    const currentTime = std.time.milliTimestamp();
+    const deltaTime = @as(f32, @floatFromInt(currentTime - state.lastTime)) / 1000;
+
+    // get mouse pos
+    c.glfwGetCursorPos(state.window, &mouseX, &mouseY);
+    std.debug.print("x, y: ({d}, {d})\n", .{ mouseX, mouseY });
+    c.glfwSetCursorPos(state.window, @floatFromInt(state.WIDTH / 2), @floatFromInt(state.HEIGHT / 2));
+
+    state.horizontalAngle += state.mouseSpeed * deltaTime * (@as(f32, @floatFromInt(state.WIDTH)) / 2 - @as(f32, @floatCast(mouseX)));
+    state.verticalAngle += state.mouseSpeed * deltaTime * (@as(f32, @floatFromInt(state.HEIGHT)) / 2 - @as(f32, @floatCast(mouseY)));
+
+    // const FoV = initialFoV - 5 * c.glfwGetMouseWheel();
+    var direction = Vector(3).init(.{ math.cos(state.verticalAngle) * math.sin(state.horizontalAngle), math.sin(state.verticalAngle), math.cos(state.verticalAngle) * math.cos(state.horizontalAngle) });
+
+    var right = Vector(3).init(.{
+        math.sin(state.horizontalAngle - 3.14 / 2.0),
+        0,
+        math.cos(state.horizontalAngle - 3.14 / 2.0),
+    });
+    const up = right.cross(direction);
+
+    const vectorOp = glmath.VectorOp;
+
+    const isUp: bool = (c.glfwGetKey(state.window, c.GLFW_KEY_UP) == c.GLFW_PRESS) or c.glfwGetKey(state.window, c.GLFW_KEY_W) == c.GLFW_PRESS;
+    const isDown: bool = (c.glfwGetKey(state.window, c.GLFW_KEY_DOWN) == c.GLFW_PRESS) or (c.glfwGetKey(state.window, c.GLFW_KEY_S) == c.GLFW_PRESS);
+    const isLeft: bool = (c.glfwGetKey(state.window, c.GLFW_KEY_LEFT) == c.GLFW_PRESS) or (c.glfwGetKey(state.window, c.GLFW_KEY_A) == c.GLFW_PRESS);
+    const isRight = (c.glfwGetKey(state.window, c.GLFW_KEY_RIGHT) == c.GLFW_PRESS) or (c.glfwGetKey(state.window, c.GLFW_KEY_D) == c.GLFW_PRESS);
+
+    //Move forward
+    if (isUp) {
+        std.debug.print("up", .{});
+        state.position = state.position.add(direction.scale(deltaTime * state.moveSpeed, vectorOp.mul));
+    }
+    // Move backward
+    if (isDown) {
+        std.debug.print("down", .{});
+        state.position = state.position.subtract(direction.scale(deltaTime * state.moveSpeed, vectorOp.mul));
+    }
+    // Strafe right
+    if (isRight) {
+        std.debug.print("right", .{});
+        state.position = state.position.add(right.scale(deltaTime * state.moveSpeed, vectorOp.mul));
+    }
+    // Strafe left
+    if (isLeft) {
+        std.debug.print("left", .{});
+        state.position = state.position.subtract(right.scale(deltaTime * state.moveSpeed, vectorOp.mul));
+    }
+
+    view.* = Matrix(4, 4).lookAt(
+        state.position,
+        state.position.add(direction),
+        up,
+    );
+
+    state.lastTime = currentTime;
 }
