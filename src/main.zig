@@ -102,7 +102,7 @@ pub fn main() !u8 {
     const width = 800;
     const height = 600;
 
-    const window: ?*c.GLFWwindow = c.glfwCreateWindow(width, height, "OpenGL sphere cube demo", null, null) orelse @panic("Cannot create GLFW window");
+    const window: ?*c.GLFWwindow = c.glfwCreateWindow(width, height, "OpenGL sphere/cube demo", null, null) orelse @panic("Cannot create GLFW window");
     defer c.glfwDestroyWindow(window);
 
     c.glfwMakeContextCurrent(window);
@@ -119,7 +119,14 @@ pub fn main() !u8 {
     glad.glUseProgram(shaderProgram);
 
     // Put the shader program, and the VAO, in focus in OpenGL's state machine.
-    const cube = glmath.Matrix(36, 3).initFlat(.{
+    //
+    var triangle = Matrix(3, 3).initFlat(.{
+        -2, -2, 10,
+        2,  -2, 10,
+        0,  2,  10,
+    });
+
+    var cube = Matrix(36, 3).initFlat(.{
         -1, -1, -1, // triangle 1 : begin
         -1, -1, 1,
         -1, 1, 1, // triangle 1 : end
@@ -196,6 +203,17 @@ pub fn main() !u8 {
         0.982, 0.099, 0.879,
     };
 
+    // vertex init
+    var vertexArrayId: c.GLuint = undefined;
+    glad.glGenVertexArrays(1, &vertexArrayId);
+    glad.glBindVertexArray(vertexArrayId);
+
+    // buffers
+    var triangleBuffer: c.GLuint = 0;
+    glad.glGenBuffers(1, &triangleBuffer);
+    glad.glBindBuffer(c.GL_ARRAY_BUFFER, triangleBuffer);
+    glad.glBufferData(c.GL_ARRAY_BUFFER, @intCast(triangle.totalElements() * @sizeOf(f32)), &triangle.val[0], c.GL_STATIC_DRAW);
+
     var shapeBuffer: c.GLuint = 0;
     glad.glGenBuffers(1, &shapeBuffer);
     glad.glBindBuffer(c.GL_ARRAY_BUFFER, shapeBuffer);
@@ -209,14 +227,10 @@ pub fn main() !u8 {
     c.glEnable(c.GL_DEPTH_TEST);
     c.glDepthFunc(c.GL_LESS);
 
-    var vertexArrayId: c.GLuint = undefined;
-    glad.glGenVertexArrays(1, &vertexArrayId);
-    glad.glBindVertexArray(vertexArrayId);
-
     // Model, view, Projection set up
     const projection = glmath.Matrix(4, 4).orthoProjection(-10, 10, -10, 10, 0, 100);
     const view = glmath.Matrix(4, 4).lookAt(
-        Vector(3).init(.{ 4, 1, -3 }),
+        Vector(3).init(.{ 1, 1, -3 }),
         Vector(3).init(.{ 0, 0, 0 }),
         Vector(3).init(.{ 0, 1, 0 }),
     );
@@ -224,6 +238,7 @@ pub fn main() !u8 {
 
     const mvpId = glad.glGetUniformLocation(shaderProgram, "MVP");
 
+    // render loop
     while ((c.glfwGetKey(window, c.GLFW_KEY_ESCAPE) != c.GLFW_PRESS) & (c.glfwWindowShouldClose(window) == 0)) {
         glad.glClearColor(0.2, 0.3, 0.3, 1.0);
         glad.glClear(c.GL_COLOR_BUFFER_BIT | c.GL_DEPTH_BUFFER_BIT);
@@ -253,8 +268,13 @@ pub fn main() !u8 {
         // draw
         glad.glDrawArrays(glad.GL_TRIANGLES, 0, 12 * 3);
 
-        glad.glDisableVertexAttribArray(0);
-        glad.glDisableVertexAttribArray(1);
+        // 1st attribute for drawing triangle
+        glad.glEnableVertexAttribArray(0);
+        glad.glBindBuffer(c.GL_ARRAY_BUFFER, triangleBuffer);
+        glad.glBindVertexArray(triangleBuffer);
+        glad.glVertexAttribPointer(0, 3, c.GL_FLOAT, c.GL_FALSE, 0, null);
+
+        glad.glDrawArrays(glad.GL_TRIANGLES, 0, 3);
 
         c.glfwSwapBuffers(window);
         c.glfwPollEvents();
